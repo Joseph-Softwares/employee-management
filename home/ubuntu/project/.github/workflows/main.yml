@@ -1,0 +1,144 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [14.x, 16.x]
+        mongodb-version: [4.4]
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v2
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+    
+    - name: Start MongoDB
+      uses: supercharge/mongodb-github-action@1.7.0
+      with:
+        mongodb-version: ${{ matrix.mongodb-version }}
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run tests
+      run: npm test
+      env:
+        NODE_ENV: test
+        MONGODB_URI: mongodb://localhost:27017/test-db
+        JWT_SECRET: test-jwt-secret
+        JWT_REFRESH_SECRET: test-jwt-refresh-secret
+    
+    - name: Upload test coverage
+      uses: actions/upload-artifact@v2
+      with:
+        name: coverage
+        path: coverage/
+  
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Use Node.js 16.x
+      uses: actions/setup-node@v2
+      with:
+        node-version: 16.x
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Build frontend
+      run: |
+        if [ -d "frontend" ]; then
+          cd frontend
+          npm ci
+          npm run build
+          cd ..
+        fi
+    
+    - name: Create production build
+      run: |
+        npm ci --production
+        cp .env.production .env
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: build
+        path: |
+          .
+          !node_modules
+          !.git
+          !.github
+  
+  deploy-heroku:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Download build artifacts
+      uses: actions/download-artifact@v2
+      with:
+        name: build
+        path: .
+    
+    - name: Deploy to Heroku
+      uses: akhileshns/heroku-deploy@v3.12.12
+      with:
+        heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
+        heroku_app_name: ${{ secrets.HEROKU_APP_NAME }}
+        heroku_email: ${{ secrets.HEROKU_EMAIL }}
+        procfile: "web: node index.js"
+      env:
+        HD_NODE_ENV: production
+        HD_MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        HD_JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        HD_JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+        HD_CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
+  
+  # Uncomment and configure for AWS deployment
+  # deploy-aws:
+  #   needs: build
+  #   runs-on: ubuntu-latest
+  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  #   
+  #   steps:
+  #   - uses: actions/checkout@v2
+  #   
+  #   - name: Download build artifacts
+  #     uses: actions/download-artifact@v2
+  #     with:
+  #       name: build
+  #       path: .
+  #   
+  #   - name: Configure AWS credentials
+  #     uses: aws-actions/configure-aws-credentials@v1
+  #     with:
+  #       aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  #       aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  #       aws-region: ${{ secrets.AWS_REGION }}
+  #   
+  #   - name: Deploy to EC2
+  #     run: |
+  #       # Add your EC2 deployment script here
+  #       # For example, using SSH to connect and deploy
+  #       # or using AWS CodeDeploy
