@@ -2,6 +2,13 @@
 
 A comprehensive system for managing employees, tasks, departments, and communications within an organization.
 
+## Live Demo
+
+The previously linked demo is no longer available. You can deploy your own
+instance using the provided deployment scripts (for example
+`./deploy-heroku.sh`).
+
+
 ## Project Structure
 
 The project is organized into backend and frontend components:
